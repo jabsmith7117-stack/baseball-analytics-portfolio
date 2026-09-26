@@ -1,0 +1,8 @@
+streamlit>=1.41
+pandas
+numpy
+plotly
+pybaseball
+scikit-learn
+xgboost
+joblib
