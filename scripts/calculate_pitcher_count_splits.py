@@ -38,16 +38,16 @@ for df in [performance, tendency, performance_pa]:
     df["count_group"] = df.apply(lambda row: count_group(row["balls"], row["strikes"]), axis=1)
 
 
-def calculate_tendency_stats(tendency_pitches):
+def calculate_tendency_stats(tendency_pitches, min_pitches=15):
     total_pitches = len(tendency_pitches)
 
-    if total_pitches < 15:
+    if total_pitches < min_pitches:
         return None
 
     swings = tendency_pitches[tendency_pitches["is_swing"]]
     swing_rate_induced = len(swings) / total_pitches if total_pitches > 0 else None
 
-    if len(tendency_pitches) > 0:
+    if tendency_pitches["pitch_type"].notna().any():
         pitch_type_counts = tendency_pitches["pitch_type"].value_counts()
         most_used_pitch = pitch_type_counts.idxmax()
         most_used_pitch_rate = pitch_type_counts.max() / total_pitches
@@ -63,10 +63,10 @@ def calculate_tendency_stats(tendency_pitches):
     }
 
 
-def calculate_performance_stats(perf_pitches, perf_pa):
+def calculate_performance_stats(perf_pitches, perf_pa, min_pa=10):
     total_pa = len(perf_pa)
 
-    if total_pa < 10:
+    if total_pa < min_pa:
         return None
 
     woba_against = (
@@ -107,6 +107,7 @@ def calculate_performance_stats(perf_pitches, perf_pa):
 
     return {
         "performance_pa": total_pa,
+        "at_bats": at_bats,
         "hits_allowed": total_hits,
         "home_runs_allowed": home_runs,
         "avg_against": round(avg_against, 3) if avg_against is not None else None,
@@ -178,8 +179,13 @@ for pitcher_id, pitcher_tendency_pitches in tendency.groupby("pitcher"):
                     & (performance_pa["strikes"] == strikes)
                 ]
 
-                tendency_stats = calculate_tendency_stats(raw_tendency)
-                performance_stats = calculate_performance_stats(raw_perf, raw_perf_pa)
+                # The full count table should display even rare exact counts.
+                # The pitch count itself lets readers judge tiny samples.
+                tendency_stats = calculate_tendency_stats(raw_tendency, min_pitches=1)
+                # Exact counts can have fewer than ten plate appearances
+                # ending on that pitch. Show observed counts with their PA
+                # sample instead of suppressing the result as N/A.
+                performance_stats = calculate_performance_stats(raw_perf, raw_perf_pa, min_pa=1)
 
                 if tendency_stats is None and performance_stats is None:
                     continue
@@ -204,6 +210,11 @@ raw_count_df = pd.DataFrame(raw_count_rows).sort_values(["pitcher_name", "vs_sta
 
 count_group_df.to_csv("data/pitcher_count_group_splits.csv", index=False)
 raw_count_df.to_csv("data/pitcher_raw_count_splits.csv", index=False)
+
+# Replace pitch-ending performance with eventual results for every plate
+# appearance that reached each exact count. Keep pitch-level tendencies.
+from build_pitcher_count_reach_outcomes import update_raw_count_outcomes
+update_raw_count_outcomes()
 
 print(f"Count-group rows: {len(count_group_df)}, unique pitchers: {count_group_df['pitcher'].nunique()}")
 print(count_group_df.head(8))

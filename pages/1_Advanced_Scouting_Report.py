@@ -218,7 +218,7 @@ with tab_pitchers:
         filtered_count = this_pitcher_count[this_pitcher_count["vs_stand"] == stand_value]
 
         st.write(f"**{selected_pitcher} By Count Situation ({handedness_filter})**")
-        st.caption("N/A means this split has no eligible result for that metric; pitch usage may still be available.")
+        st.caption("Grouped performance uses plate appearances ending on a pitch thrown in the group. N/A means the split lacks enough completed appearances.")
         show_table(
             format_for_display(filtered_count, extra_drop=["vs_stand"]),
             sticky_column="Count Situation",
@@ -229,11 +229,21 @@ with tab_pitchers:
         raw_count_df = pd.read_csv("data/pitcher_raw_count_splits.csv")
         this_pitcher_raw_count = raw_count_df[raw_count_df["pitcher"] == selected_pitcher_id]
         filtered_raw_count = this_pitcher_raw_count[this_pitcher_raw_count["vs_stand"] == stand_value]
-        render_count_tree(filtered_raw_count, key_prefix=f"pitcher_{selected_pitcher_id}_{stand_value}")
+        st.caption("Exact-count table uses 2026 data. Outcomes follow each plate appearance to its finish; pitch and swing measures describe pitches thrown at the selected count.")
+        render_count_tree(filtered_raw_count, key_prefix=f"pitcher_{selected_pitcher_id}_{stand_value}", keep_sample_size=True)
 
         with st.expander("View Full Count Table Instead"):
+            st.info(
+                "**How to read this table:** Sample Size (Pitches) counts pitches thrown "
+                "at this count. Sample Size (PA) counts plate appearances that reached it, including "
+                "outcomes on later pitches. The sample can be small. At Bats excludes walks "
+                "and other non-at-bat results, so zero hits and a .000 AVG can occur alongside "
+                "a positive wOBA. N/A for Whiff Rate means no qualifying swings at that count; "
+                "N/A for Hard-Hit Rate or Exit Velocity means no qualifying balls in play "
+                "at that count. These values do not describe every pitch in the appearance."
+            )
             show_table(
-                format_for_display(filtered_raw_count, extra_drop=["vs_stand"]),
+                format_for_display(filtered_raw_count, extra_drop=["vs_stand"], keep_sample_size=True),
                 sticky_column="Count",
                 use_container_width=True
             )
