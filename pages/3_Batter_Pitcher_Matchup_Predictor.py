@@ -356,11 +356,10 @@ st.header(f"Pitch Sequencing: {selected_pitcher} vs. {selected_batter}")
 
 st.write(
     """
-    Click through this pitcher's real 2026 pitch selections to explore
-    how an at-bat might actually unfold. Each button shows the pitcher's
-    real usage rate for that pitch at this count, plus how this hitter
-    has performed against that pitch type this season. Selecting a pitch
-    advances to the most common real resulting count from that pitch.
+    Explore the pitcher's recorded arsenal at each count. Count-specific
+    rates describe pitches followed by another pitch in the same plate
+    appearance; season usage is shown when that sample is absent. Choose
+    a pitch and then its ball, strike, foul, or plate-appearance result.
     """
 )
 
@@ -377,29 +376,27 @@ this_pitcher_outcomes = outcome_df[
     & (outcome_df["vs_stand"] == effective_bats)
 ]
 
-if len(this_pitcher_pitch_choices) == 0:
-    st.info(f"Not enough 2026 sequencing data for {selected_pitcher} against {effective_bats}-handed hitters.")
+if this_pitcher_arsenal.empty:
+    st.info(f"No recorded arsenal is available for {selected_pitcher}.")
 else:
-    st.caption(f"Observed pitch choices against {effective_bats}-handed batters; only pitches actually recorded for this pitcher at the current count appear.")
+    st.caption(f"Observed continuing-pitch choices against {effective_bats}-handed batters; every recorded arsenal pitch remains selectable. An unobserved outcome has no estimated probability.")
     render_pitch_sequence_tree(
         pitch_choice_df=this_pitcher_pitch_choices,
         outcome_df=this_pitcher_outcomes,
         hitter_pitch_type_by_count_df=hitter_pitch_type_by_count_df,
         batter_name=selected_batter,
         pitcher_throws=matchup_row["throws"],
-        key_prefix=f"seq_{selected_pitcher}_{selected_batter}"
+        key_prefix=f"seq_{selected_pitcher}_{selected_batter}",
+        pitcher_arsenal=this_pitcher_arsenal,
     )
 
 st.caption(
     """
-    Sequences are built from real, observed 2026 pitch-to-pitch
-    transitions for this specific pitcher, against hitters of this
-    handedness, requiring a minimum of 5 real observations at each
-    step. Given the granularity involved (specific pitcher, count, and
-    pitch combination), some paths may have limited underlying sample
-    size - this reflects a genuine tradeoff between specificity and
-    statistical reliability inherent to sequencing analysis on a single
-    season of data.
+    Count-specific rates are built from observed 2026 transitions for
+    this pitcher against hitters of this handedness. Because ending
+    pitches do not have a next pitch, these rates are conditional on
+    the plate appearance continuing. Paths without such observations
+    are exploratory and carry no estimated rate.
     """
 )
 st.header("Methodology")

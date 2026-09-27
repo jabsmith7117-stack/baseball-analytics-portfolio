@@ -95,6 +95,7 @@ COLUMN_RENAME = {
     "home_runs_allowed": "HR Allowed",
     "strikeouts": "Strikeouts",
     "performance_pa": "Sample Size (PA)",
+    "at_bats": "At Bats",
     "tendency_pitches": "Sample Size (Pitches)",
     "tendency_pitches_seen": "Sample Size (Pitches)"
 }
@@ -230,7 +231,7 @@ def colorful_columns(df, overrides=None):
 import streamlit as st
 
 
-def render_count_tree(raw_count_df, key_prefix):
+def render_count_tree(raw_count_df, key_prefix, keep_sample_size=False):
     """Interactive count navigator: starts at 0-0, lets the user
     click Ball or Strike to drill into the next count, showing that
     count's stats at each step. Uses Streamlit session_state to
@@ -259,7 +260,10 @@ def render_count_tree(raw_count_df, key_prefix):
     if len(current_row) == 0:
         st.info("No data available at this count (sample too small).")
     else:
-        display_row = format_for_display(current_row, extra_drop=["balls", "strikes", "count"])
+        display_row = format_for_display(
+            current_row, extra_drop=["balls", "strikes", "count"],
+            keep_sample_size=keep_sample_size,
+        )
         show_table(display_row, use_container_width=True)
 
     col_ball, col_strike, col_reset = st.columns(3)
@@ -375,111 +379,105 @@ def generate_pitch_sequence_guide(
         })
 
     return sequence, weakest_zone
-def render_pitch_sequence_tree(pitch_choice_df, outcome_df, hitter_pitch_type_by_count_df, batter_name, pitcher_throws, key_prefix):
-    """Interactive pitch sequencing tree: at each count, shows the
-    pitcher's real pitch-type distribution (with count-specific hitter
-    context), lets the user pick one, then shows the REAL distribution
-    of resulting counts (ball vs strike outcomes) for that specific
-    pitch as a second set of buttons - not an automatic jump to the
-    most common one."""
+def render_pitch_sequence_tree(pitch_choice_df, outcome_df, hitter_pitch_type_by_count_df,
+                               batter_name, pitcher_throws, key_prefix, pitcher_arsenal):
+    """Explore a pitcher's entire recorded arsenal through valid count outcomes.
 
+    Pitch choice and outcome rates are conditional on a plate appearance
+    continuing to another pitch. Ending pitches are not in those tables, so
+    unobserved choices remain available without invented probabilities.
+    """
     count_key = f"{key_prefix}_seq_count"
     history_key = f"{key_prefix}_seq_history"
-    pending_pitch_key = f"{key_prefix}_seq_pending_pitch"
+    pending_key = f"{key_prefix}_seq_pending_pitch"
+    finished_key = f"{key_prefix}_seq_finished"
+    for key, default in ((count_key, "0-0"), (history_key, []),
+                         (pending_key, None), (finished_key, None)):
+        if key not in st.session_state:
+            st.session_state[key] = default
 
-    if count_key not in st.session_state:
-        st.session_state[count_key] = "0-0"
-    if history_key not in st.session_state:
-        st.session_state[history_key] = []
-    if pending_pitch_key not in st.session_state:
-        st.session_state[pending_pitch_key] = None
-
-    current_count = st.session_state[count_key]
+    count = st.session_state[count_key]
     history = st.session_state[history_key]
-    pending_pitch = st.session_state[pending_pitch_key]
+    pending = st.session_state[pending_key]
+    finished = st.session_state[finished_key]
+    st.write("**Sequence so far:** " + " → ".join(history) + f" → **{count}**" if history
+             else f"**Starting count: {count}**")
 
-    if history:
-        st.write("**Sequence so far:** " + " → ".join(history) + f" → **{current_count}**")
+    if finished:
+        st.success(f"Plate appearance complete: {finished}. Reset to explore another path.")
+    elif pending is None:
+        observed = pitch_choice_df[pitch_choice_df["count"] == count]
+        options = pitcher_arsenal.sort_values("usage_rate", ascending=False)
+        st.write(f"**Pitch {len(history) + 1}: choose a pitch at {count}**")
+        for _, arsenal_row in options.iterrows():
+            pitch_type = arsenal_row["pitch_type"]
+            pitch_display = PITCH_TYPE_NAMES.get(pitch_type, pitch_type)
+            choice = observed[observed["pitch_type"] == pitch_type]
+            if not choice.empty:
+                row = choice.iloc[0]
+                pitch_note = (f"{row['pitch_rate']:.1%} among {int(row['total_pitches_at_count'])} "
+                              "pitches with a recorded next pitch")
+            else:
+                usage = arsenal_row.get("usage_rate")
+                pitch_note = (f"{usage:.1%} season usage; no continuing-pitch sample at this count"
+                              if pd.notna(usage) else "recorded arsenal pitch; no continuing-pitch sample")
+            hitter_row = hitter_pitch_type_by_count_df[
+                (hitter_pitch_type_by_count_df["batter_name"] == batter_name)
+                & (hitter_pitch_type_by_count_df["pitch_type"] == pitch_type)
+                & (hitter_pitch_type_by_count_df["count"] == count)
+                & (hitter_pitch_type_by_count_df["vs_throws"] == pitcher_throws)
+            ]
+            hitter_note = ""
+            if not hitter_row.empty and pd.notna(hitter_row.iloc[0].get("woba")):
+                row = hitter_row.iloc[0]
+                hitter_note = f" | hitter wOBA {row['woba']:.3f} ({int(row['performance_pa'])} PA)"
+            if st.button(f"{pitch_display} ({pitch_note}){hitter_note}",
+                         key=f"{key_prefix}_pitch_{count}_{pitch_type}"):
+                st.session_state[pending_key] = pitch_type
+                st.rerun()
     else:
-        st.write(f"**Starting count: {current_count}**")
+        balls, strikes = map(int, count.split("-"))
+        pitch_display = PITCH_TYPE_NAMES.get(pending, pending)
+        observed = outcome_df[(outcome_df["count"] == count)
+                              & (outcome_df["pitch_type"] == pending)]
+        st.write(f"**Pitch {len(history) + 1} result: {pitch_display} at {count}**")
+        st.caption("Observed rates below are conditional on another pitch following in the same plate appearance. Missing rates do not make a baseball outcome impossible.")
 
-    if pending_pitch is None:
-        # STEP 1: choose which pitch is thrown at this count.
-        pitch_options_df = pitch_choice_df[pitch_choice_df["count"] == current_count]
-
-        if len(pitch_options_df) == 0:
-            st.info("No further data available at this count. Try resetting.")
-        else:
-            pitch_options_df = pitch_options_df.sort_values("pitch_rate", ascending=False)
-
-            st.write(f"**Pitch {len(history) + 1}: what does this pitcher throw at {current_count}?**")
-
-            for _, row in pitch_options_df.iterrows():
-                pitch_type = row["pitch_type"]
-                pitch_display = PITCH_TYPE_NAMES.get(pitch_type, pitch_type)
-
-                hitter_row = hitter_pitch_type_by_count_df[
-                    (hitter_pitch_type_by_count_df["batter_name"] == batter_name)
-                    & (hitter_pitch_type_by_count_df["pitch_type"] == pitch_type)
-                    & (hitter_pitch_type_by_count_df["count"] == current_count)
-                    & (hitter_pitch_type_by_count_df["vs_throws"] == pitcher_throws)
-                ]
-                hitter_note = ""
-                if len(hitter_row) > 0 and pd.notna(hitter_row.iloc[0].get("woba")):
-                    pa_count = int(hitter_row.iloc[0]["performance_pa"])
-                    sample_warning = " ⚠️" if pa_count < 5 else ""
-                    hitter_note = (
-                        f" | Hitter's wOBA vs this pitch from a {pitcher_throws}HP AT {current_count}: "
-                        f"{hitter_row.iloc[0]['woba']:.3f} ({pa_count} PA){sample_warning}"
-                    )
+        def add_result(label, next_count=None, ending=None):
+            sample = observed[observed["resulting_count"] == next_count] if next_count else observed.iloc[0:0]
+            if next_count:
+                note = (f" ({sample.iloc[0]['outcome_rate']:.1%} of continuing pitches)"
+                        if not sample.empty else " (no continuing-pitch rate)")
+            else:
+                note = " (ending pitches excluded from transition table)"
+            if st.button(label + note, key=f"{key_prefix}_result_{count}_{pending}_{label}"):
+                st.session_state[history_key] = history + [f"{count} ({pitch_display}) → {label}"]
+                st.session_state[pending_key] = None
+                if ending:
+                    st.session_state[finished_key] = ending
                 else:
-                    hitter_note = f" | No 2026 data for hitter vs this pitch from a {pitcher_throws}HP at {current_count}"
-
-                button_label = (
-                    f"{pitch_display} ({row['pitch_rate']:.1%} of {int(row['total_pitches_at_count'])} pitches "
-                    f"at this count){hitter_note}"
-                )
-
-                if st.button(button_label, key=f"{key_prefix}_pitch_{current_count}_{pitch_type}"):
-                    st.session_state[pending_pitch_key] = pitch_type
-                    st.rerun()
-
-    else:
-        # STEP 2: given the pitch just chosen, pick the real resulting
-        # count (ball or strike outcome), shown as its own set of
-        # buttons with real observed rates - not auto-selected.
-        pending_display = PITCH_TYPE_NAMES.get(pending_pitch, pending_pitch)
-        st.write(f"**Pitch {len(history) + 1} result: {pending_display} was thrown. What count came next?**")
-
-        outcome_options = outcome_df[
-            (outcome_df["count"] == current_count)
-            & (outcome_df["pitch_type"] == pending_pitch)
-        ].sort_values("outcome_rate", ascending=False)
-
-        if len(outcome_options) == 0:
-            st.info("No outcome data for this specific pitch at this count.")
-            if st.button("← Back to pitch selection", key=f"{key_prefix}_back_{current_count}"):
-                st.session_state[pending_pitch_key] = None
-                st.rerun()
-        else:
-            for _, row in outcome_options.iterrows():
-                next_count = row["resulting_count"]
-                outcome_label = f"→ {next_count} ({row['outcome_rate']:.1%} of {int(row['total_this_pitch_at_count'])} times)"
-
-                if st.button(outcome_label, key=f"{key_prefix}_outcome_{current_count}_{pending_pitch}_{next_count}"):
-                    st.session_state[history_key] = history + [f"{current_count} ({pending_display})"]
                     st.session_state[count_key] = next_count
-                    st.session_state[pending_pitch_key] = None
-                    st.rerun()
-
-            if st.button("← Back to pitch selection", key=f"{key_prefix}_back2_{current_count}"):
-                st.session_state[pending_pitch_key] = None
                 st.rerun()
+
+        if balls < 3:
+            add_result(f"Ball → {balls + 1}-{strikes}", f"{balls + 1}-{strikes}")
+        else:
+            add_result("Ball four → Walk", ending="Walk")
+        if strikes < 2:
+            add_result(f"Strike → {balls}-{strikes + 1}", f"{balls}-{strikes + 1}")
+        else:
+            add_result("Foul → count stays", count)
+            add_result("Strike three → Strikeout", ending="Strikeout")
+        add_result("Ball in play → PA ends", ending="Ball in play")
+        if st.button("← Back to pitch selection", key=f"{key_prefix}_back_{count}"):
+            st.session_state[pending_key] = None
+            st.rerun()
 
     if st.button("↺ Reset Sequence", key=f"{key_prefix}_seq_reset"):
         st.session_state[count_key] = "0-0"
         st.session_state[history_key] = []
-        st.session_state[pending_pitch_key] = None
+        st.session_state[pending_key] = None
+        st.session_state[finished_key] = None
         st.rerun()
 
 # Exact coefficients from the trained success probability model
