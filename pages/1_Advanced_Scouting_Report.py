@@ -230,7 +230,7 @@ with tab_pitchers:
         this_pitcher_raw_count = raw_count_df[raw_count_df["pitcher"] == selected_pitcher_id]
         filtered_raw_count = this_pitcher_raw_count[this_pitcher_raw_count["vs_stand"] == stand_value]
         st.caption("Exact-count table uses 2026 data. Outcomes follow each plate appearance to its finish; pitch and swing measures describe pitches thrown at the selected count.")
-        render_count_tree(filtered_raw_count, key_prefix=f"pitcher_{selected_pitcher_id}_{stand_value}", keep_sample_size=True)
+        render_count_tree(filtered_raw_count, key_prefix=f"pitcher_{selected_pitcher_id}_{stand_value}")
 
         with st.expander("View Full Count Table Instead"):
             st.info(
