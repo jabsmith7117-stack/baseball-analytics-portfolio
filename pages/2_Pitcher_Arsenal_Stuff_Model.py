@@ -69,7 +69,11 @@ if index_path.exists():
     roster = roster.drop_duplicates(subset="pitcher_name", keep="first")
 
 pitcher_stuff["pitcher_name"] = pitcher_stuff["player_name"].map(roster_name)
-pitcher_stuff = pitcher_stuff.merge(roster, on="pitcher_name", how="inner", validate="many_to_one")
+roster["_pitcher_key"] = roster["pitcher_name"].str.strip().str.casefold()
+pitcher_stuff["_pitcher_key"] = pitcher_stuff["pitcher_name"].str.strip().str.casefold()
+roster_teams = roster[["_pitcher_key", "current_team"]].drop_duplicates("_pitcher_key")
+pitcher_stuff = pitcher_stuff.merge(roster_teams, on="_pitcher_key", how="inner", validate="many_to_one")
+pitcher_stuff = pitcher_stuff.drop(columns="_pitcher_key")
 
 st.header("Pitchers")
 team_options = ["All teams"] + sorted(pitcher_stuff["current_team"].dropna().unique())
